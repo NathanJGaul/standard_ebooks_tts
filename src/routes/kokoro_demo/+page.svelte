@@ -72,7 +72,7 @@
             id="text-input"
             name="text-input" 
             bind:value={textToSpeak}
-            class="w-full p-2 border border-gray-300 rounded"
+            class="textarea w-full"
             rows="3"
         ></textarea>
     </div>
@@ -83,7 +83,7 @@
         <select 
             id="voice-select"
             bind:value={selectedVoice}
-            class="p-2 border border-gray-300 rounded"
+            class="select"
         >
             {#each availableVoices as voice}
                 <option value={voice}>{voice}</option>
@@ -95,7 +95,7 @@
     <button 
         onclick={handleSubmit} 
         disabled={isLoading || isGenerating || !tts}
-        class="px-4 py-2 bg-blue-500 text-white rounded disabled:opacity-50"
+        class="btn btn-primary"
     >
         {isGenerating ? 'Generating...' : 'Speak Text'}
     </button>
