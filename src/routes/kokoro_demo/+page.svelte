@@ -2,7 +2,7 @@
     import { KokoroTTS } from "kokoro-js";
     import { onMount } from "svelte";
 
-    import { sampleTexts } from "$lib/client/tts";
+    import sampleTexts from "$lib/client/sampleTexts";
     
     let textToSpeak = $state('Life is like a box of chocolates. You never know what you\'re gonna get.');
     let tts = $state<KokoroTTS>();

@@ -1,4 +1,4 @@
-export const sampleTexts = [
+const sampleTexts = [
     'Life is like a box of chocolates. You never know what you\'re gonna get.',
     'The quick brown fox jumps over the lazy dog.',
     'To be or not to be, that is the question.',
@@ -10,3 +10,5 @@ export const sampleTexts = [
     'The greatest glory in living lies not in never falling, but in rising every time we fall.',
     'The way to get started is to quit talking and begin doing.'
 ];
+
+export default sampleTexts;

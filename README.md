@@ -17,7 +17,7 @@
 - [X] Get [Kokoro v1](https://huggingface.co/hexgrad/Kokoro-82M) to produce sound
 - [ ] Integrate web worker
 - [ ] Voice mixing
-- [ ] Custome Voice Cloning/Training
+- [ ] Custom Voice Cloning/Training
 - [ ] Create custom interface for [Standard Ebooks](https://standardebooks.org/)
 - [ ] Chunk text from ebook one-page for TTS processing
 - [ ] End-to-End Pipeline: Search, Find book, Generate chunks of audiobook, combine into audiobook
