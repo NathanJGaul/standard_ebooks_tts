@@ -101,6 +101,42 @@
         textToSpeak = sampleTexts[randomIndex];
     }
     
+    // Format voice name for display
+    function formatVoiceName(voice: VoiceType): string {
+        // Parse voice ID format (e.g., "af_heart", "bm_daniel")
+        const parts = voice.split('_');
+        if (parts.length !== 2) return voice;
+        
+        const [typeCode, name] = parts;
+        
+        // Map country codes to flag emojis
+        let countryEmoji = '';
+        if (typeCode.startsWith('a')) countryEmoji = '🇺🇸'; // American
+        else if (typeCode.startsWith('b')) countryEmoji = '🇬🇧'; // British
+        else countryEmoji = '🌐'; // Unknown country
+        
+        // Map gender codes to gender emojis
+        let genderEmoji = '';
+        if (typeCode.endsWith('f')) genderEmoji = '👩'; // Female
+        else if (typeCode.endsWith('m')) genderEmoji = '👨'; // Male
+        else genderEmoji = '🧑'; // Unknown gender
+        
+        // Get full voice type text (keep this for accessibility and clarity)
+        let voiceType = '';
+        if (typeCode === 'af') voiceType = 'American Female';
+        else if (typeCode === 'am') voiceType = 'American Male';
+        else if (typeCode === 'bf') voiceType = 'British Female';
+        else if (typeCode === 'bm') voiceType = 'British Male';
+        else voiceType = typeCode.toUpperCase(); // Fallback for unknown types
+        
+        // Capitalize the name
+        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
+        
+        // Format with emojis: [Flag][Gender] Name (Voice Type)
+        // return `${countryEmoji}${genderEmoji} ${capitalizedName} (${voiceType})`;
+        return `${countryEmoji}${genderEmoji} ${capitalizedName}`;
+    }
+    
     // Handle form submission to generate speech
     async function handleSubmit() {
         if (!worker || !textToSpeak.trim() || isGenerating) return;
@@ -213,7 +249,7 @@
                 class="select select-bordered"
             >
                 {#each availableVoices as voice}
-                    <option value={voice}>{voice}</option>
+                    <option value={voice}>{formatVoiceName(voice)}</option>
                 {/each}
             </select>
         </div>
