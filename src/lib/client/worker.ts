@@ -1,11 +1,11 @@
 import { KokoroTTS, TextSplitterStream } from "kokoro-js";
 import { detectWebGPU } from "$lib/client/utils";
-import type { 
-  DeviceType, 
-  ModelDtype, 
-  WorkerOutMessage, 
+import type {
+  AudioChunk,
+  DeviceType,
+  ModelDtype,
   WorkerInMessage,
-  AudioChunk 
+  WorkerOutMessage,
 } from "$lib/types/worker";
 import type { VoiceType } from "$lib/types/voices";
 
@@ -28,48 +28,52 @@ try {
     dtype: DTYPE,
     device,
   });
-  
-  self.postMessage({ 
-    status: "ready", 
+
+  self.postMessage({
+    status: "ready",
     voices: Object.keys(tts.voices) as VoiceType[],
-    device 
+    device,
   } as WorkerOutMessage);
-  
+
   // Set up message handler for TTS requests
   self.addEventListener("message", async (e: MessageEvent) => {
     const { text, voice, speed } = e.data as WorkerInMessage;
-    
+
     try {
       await processTextToSpeech(text, voice, speed, tts);
     } catch (error) {
-      self.postMessage({ 
-        status: "error", 
-        error: error instanceof Error ? error.message : "Unknown error processing speech" 
+      self.postMessage({
+        status: "error",
+        error: error instanceof Error
+          ? error.message
+          : "Unknown error processing speech",
       } as WorkerOutMessage);
     }
   });
 } catch (e) {
-  const errorMessage = e instanceof Error ? e.message : "Failed to load TTS model";
-  self.postMessage({ 
-    status: "error", 
-    error: errorMessage 
+  const errorMessage = e instanceof Error
+    ? e.message
+    : "Failed to load TTS model";
+  self.postMessage({
+    status: "error",
+    error: errorMessage,
   } as WorkerOutMessage);
 }
 
 /**
  * Processes text to speech, streams chunks back to main thread,
  * and sends the complete audio when finished.
- * 
+ *
  * @param text - The text to convert to speech
  * @param voice - The voice to use
  * @param speed - The speech speed
  * @param tts - The KokoroTTS instance
  */
 async function processTextToSpeech(
-  text: string, 
-  voice: VoiceType, 
-  speed: number, 
-  tts: KokoroTTS
+  text: string,
+  voice: VoiceType,
+  speed: number,
+  tts: KokoroTTS,
 ): Promise<void> {
   // Set up text streaming
   const streamer = new TextSplitterStream();
@@ -78,7 +82,7 @@ async function processTextToSpeech(
 
   const stream = tts.stream(streamer, { voice, speed });
   const chunks: AudioChunk[] = [];
-  
+
   // Process and stream each chunk
   for await (const { text, audio } of stream) {
     self.postMessage({
@@ -94,21 +98,21 @@ async function processTextToSpeech(
   // Merge audio chunks
   if (chunks.length > 0) {
     const mergedAudio = mergeAudioChunks(chunks);
-    self.postMessage({ 
-      status: "complete", 
-      audio: mergedAudio.toBlob() 
+    self.postMessage({
+      status: "complete",
+      audio: mergedAudio.toBlob(),
     } as WorkerOutMessage);
   } else {
-    self.postMessage({ 
-      status: "complete", 
-      audio: null 
+    self.postMessage({
+      status: "complete",
+      audio: null,
     } as WorkerOutMessage);
   }
 }
 
 /**
  * Merge multiple audio chunks into a single audio object
- * 
+ *
  * @param chunks - Array of audio chunks
  * @returns - Merged audio object
  */
@@ -116,7 +120,7 @@ function mergeAudioChunks(chunks: AudioChunk[]): AudioChunk {
   const sampling_rate = chunks[0].sampling_rate;
   const length = chunks.reduce((sum, chunk) => sum + chunk.audio.length, 0);
   const waveform = new Float32Array(length);
-  
+
   let offset = 0;
   for (const { audio } of chunks) {
     waveform.set(audio, offset);

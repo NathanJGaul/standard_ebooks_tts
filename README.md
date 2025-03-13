@@ -14,11 +14,14 @@
 
 ## ToDos
 
-- [X] Get [Kokoro v1](https://huggingface.co/hexgrad/Kokoro-82M) to produce sound
-- [X] Integrate web worker
+- [x] Get [Kokoro v1](https://huggingface.co/hexgrad/Kokoro-82M) to produce
+      sound
+- [x] Integrate web worker
 - [ ] Voice mixing
-- [ ] Create a categorize system for different voices, and use AI to determine their properties
+- [ ] Create a categorize system for different voices, and use AI to determine
+      their properties
 - [ ] Custom Voice Cloning/Training
 - [ ] Create custom interface for [Standard Ebooks](https://standardebooks.org/)
 - [ ] Chunk text from ebook one-page for TTS processing
-- [ ] End-to-End Pipeline: Search, Find book, Generate chunks of audiobook, combine into audiobook
+- [ ] End-to-End Pipeline: Search, Find book, Generate chunks of audiobook,
+      combine into audiobook
