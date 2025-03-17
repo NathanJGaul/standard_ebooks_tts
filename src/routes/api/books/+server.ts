@@ -201,7 +201,7 @@ export const GET: RequestHandler = async ({ url, getClientAddress }) => {
         
         // Check if cache should be bypassed
         // const noCache = url.searchParams.get('no-cache') === 'true';
-        const noCache = false
+        const noCache = true; // For testing purposes, always bypass cache
         
         // Get book data
         const books = await scrapeBooks(page, noCache);

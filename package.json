@@ -49,6 +49,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.4.0",
     "@libsql/client": "^0.14.0",
+    "cheerio": "^1.0.0",
     "drizzle-orm": "^0.40.0",
     "kokoro-js": "^1.2.0"
   }

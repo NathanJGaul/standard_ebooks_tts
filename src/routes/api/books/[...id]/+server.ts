@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { Book } from '../+server';
+import * as cheerio from 'cheerio';
 
 // In-memory cache with expiration
 type CacheEntry = {
@@ -32,13 +33,13 @@ interface BookDetails extends Book {
 /**
  * Fetch and parse detailed book data from Standard Ebooks
  */
-async function scrapeBookDetails(id: string): Promise<BookDetails> {
+async function scrapeBookDetails(id: string, skipCache = true): Promise<BookDetails> {
     try {
         // Check cache first
         const cacheKey = `book_${id}`;
         const cached = cache[cacheKey];
         
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        if (!skipCache && cached && Date.now() - cached.timestamp < CACHE_TTL) {
             console.log(`[API] Serving book details from cache: ${id}`);
             return cached.data;
         }
@@ -81,37 +82,35 @@ async function scrapeBookDetails(id: string): Promise<BookDetails> {
  */
 function parseBookDetailsHtml(html: string, id: string): BookDetails {
     try {
+        const $ = cheerio.load(html);
         // Basic book properties
-        const title = extractValue(html, /<h1[^>]*>(.*?)<\/h1>/);
-        const author = extractValue(html, /<h2[^>]*>(.*?)<\/h2>/);
-        const description = extractValue(html, /<meta name="description" content="([^"]+)"/);
-        
-        // Cover URL
-        const coverMatch = html.match(/src="([^"]+cover\.jpg)"/);
-        const coverUrl = coverMatch 
-            ? `${STANDARD_EBOOKS_BASE_URL}${coverMatch[1]}`
-            : '';
+        const title = $(`h1[property="schema:name"]`).text().trim();
+        const author = $(`span[property="schema:name"]`, `a[property="schema:author"]`).text().trim();
+        const description = $(`p`, `section#description`).text() || '';
+        const coverImg = $(`img`, `.realistic-ebook`).attr(`src`) || '';
+        const coverUrl = coverImg ? `${STANDARD_EBOOKS_BASE_URL}${coverImg}` : '';
             
         // Extract metadata
-        const language = extractValue(html, /<dd class="language">([^<]+)<\/dd>/);
+        // const language = extractValue(html, /<dd class="language">([^<]+)<\/dd>/);
         
         // Subjects/categories
-        const subjects: string[] = [];
-        const subjectMatches = html.matchAll(/<a href="\/ebooks\/subjects\/[^"]+"[^>]*>([^<]+)<\/a>/g);
-        for (const match of subjectMatches) {
-            if (match[1]) subjects.push(match[1].trim());
-        }
+        // const subjects: string[] = [];
+        // const subjectMatches = html.matchAll(/<a href="\/ebooks\/subjects\/[^"]+"[^>]*>([^<]+)<\/a>/g);
+        // for (const match of subjectMatches) {
+        //     if (match[1]) subjects.push(match[1].trim());
+        // }
         
         // Publication date
-        const publicationDate = extractValue(html, /<dd class="created">([^<]+)<\/dd>/);
+        // const publicationDate = extractValue(html, /<dd class="created">([^<]+)<\/dd>/);
         
         // Word count
-        const wordCountStr = extractValue(html, /<dd class="word-count">([^<]+)<\/dd>/);
-        const wordCount = wordCountStr ? parseInt(wordCountStr.replace(/,/g, ''), 10) : undefined;
+        // const wordCountStr = extractValue(html, /<dd class="word-count">([^<]+)<\/dd>/);
+        // const wordCount = wordCountStr ? parseInt(wordCountStr.replace(/,/g, ''), 10) : undefined;
+        const wordCount = parseInt($(`meta[property='schema:wordCount']`, `#reading-ease`).attr(`content`) ?? "") || undefined;
         
         // Reading ease
-        const readingEaseStr = extractValue(html, /<dd class="reading-ease">([^<]+)<\/dd>/);
-        const readingEase = readingEaseStr ? parseFloat(readingEaseStr) : undefined;
+        // const readingEaseStr = extractValue(html, /<dd class="reading-ease">([^<]+)<\/dd>/);
+        // const readingEase = readingEaseStr ? parseFloat(readingEaseStr) : undefined;
         
         // Get chapters if available
         const chapters = extractChapters(html);
@@ -128,12 +127,12 @@ function parseBookDetailsHtml(html: string, id: string): BookDetails {
             description,
             url,
             downloadUrl,
-            language,
-            subjects,
-            publicationDate,
+            // language,
+            // subjects,
+            // publicationDate,
             wordCount,
-            readingEase,
-            chapters
+            // readingEase,
+            // chapters
         };
     } catch (err) {
         console.error('Error parsing book details HTML:', err);
@@ -182,20 +181,6 @@ function extractChapters(html: string) {
 }
 
 /**
- * Helper function to extract values using regex
- */
-function extractValue(html: string, pattern: RegExp): string {
-    const match = html.match(pattern);
-    return match && match[1] 
-        ? match[1]
-            .replace(/<[^>]+>/g, '') // Remove HTML tags
-            .replace(/&amp;/g, '&')   // Fix HTML entities
-            .replace(/&quot;/g, '"')
-            .trim()
-        : '';
-}
-
-/**
  * GET handler for book details API
  */
 export const GET: RequestHandler = async ({ params }) => {
@@ -205,16 +190,23 @@ export const GET: RequestHandler = async ({ params }) => {
         if (!id) {
             throw error(400, 'Missing book ID');
         }
+
+        const noCache = true; // For testing purposes, always bypass cache
         
         // Get book details
-        const bookDetails = await scrapeBookDetails(id);
+        const bookDetails = await scrapeBookDetails(id, noCache);
+
+        // Set appropriate cache headers
+        const cacheControl = noCache
+            ? 'no-store, max-age=0'
+            : 'public, max-age=86400'; // Cache for 1 day
         
         // Return as JSON
         return new Response(JSON.stringify(bookDetails), {
             status: 200,
             headers: {
                 'Content-Type': 'application/json',
-                'Cache-Control': 'public, max-age=86400' // Cache for 1 day
+                'Cache-Control': cacheControl
             }
         });
     } catch (e: any) {
