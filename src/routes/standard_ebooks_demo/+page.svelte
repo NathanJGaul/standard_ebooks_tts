@@ -1,6 +1,8 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import type { Book } from "../api/books/+server";
+    import type { WorkerOutMessage, WorkerInMessage } from "$lib/types/worker";
+    import type { VoiceType } from "$lib/types/voices";
 
     // State variables
     let books = $state<Book[]>([]);
@@ -14,10 +16,159 @@
     let totalChunks = $state(0);
     let ttsText = $state('');
 
+    // TTS state variables
+    let worker = $state<Worker | null>(null);
+    let isGenerating = $state(false);
+    let availableVoices = $state<VoiceType[]>([]);
+    let selectedVoice = $state<VoiceType>("af_heart");
+    let deviceType = $state<string>("");
+    let audioQueue = $state<Blob[]>([]);
+    let currentAudio = $state<HTMLAudioElement | null>(null);
+    let streamedText = $state<string>("");
+    let speedSetting = $state<number>(1.0);
+
     // Fetch books on component load
     onMount(async () => {
         await fetchBooks();
+        initializeWorker();
     });
+    
+    // Clean up worker on component destroy
+    onDestroy(() => {
+        if (worker) {
+            worker.terminate();
+        }
+    });
+
+    // Initialize the TTS web worker
+    function initializeWorker() {
+        try {
+            // Create the worker
+            worker = new Worker(new URL('$lib/client/worker.ts', import.meta.url), { type: 'module' });
+            
+            // Set up event handler for worker messages
+            worker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
+                const data = event.data;
+                
+                switch (data.status) {
+                    case "device":
+                        deviceType = data.device;
+                        console.log(`Using device: ${deviceType}`);
+                        break;
+                        
+                    case "ready":
+                        availableVoices = data.voices as VoiceType[];
+                        deviceType = data.device;
+                        console.log('Kokoro TTS model loaded and ready through worker');
+                        break;
+                        
+                    case "stream":
+                        // Handle streaming chunk
+                        streamedText = data.chunk.text;
+                        const audioBlob = data.chunk.audio;
+                        
+                        // Add to audio queue and play if not already playing
+                        addToAudioQueue(audioBlob);
+                        break;
+                        
+                    case "complete":
+                        // TTS generation complete
+                        isGenerating = false;
+                        if (data.audio) {
+                            console.log('TTS generation complete with full audio');
+                        } else {
+                            console.log('TTS generation complete, no audio generated');
+                        }
+                        break;
+                        
+                    case "error":
+                        console.error(`Worker error: ${data.error}`);
+                        isGenerating = false;
+                        error = `TTS Error: ${data.error}`;
+                        break;
+                }
+            };
+            
+            // Handle worker errors
+            worker.onerror = (error) => {
+                console.error('Worker error:', error);
+                isGenerating = false;
+            };
+            
+        } catch (error) {
+            console.error('Error initializing worker:', error);
+            isGenerating = false;
+        }
+    }
+    
+    // Add audio blob to queue and play if not already playing
+    function addToAudioQueue(audioBlob: Blob) {
+        audioQueue = [...audioQueue, audioBlob];
+        
+        // If not currently playing audio, start playing
+        if (!currentAudio) {
+            playNextInQueue();
+        }
+    }
+    
+    // Play next audio in queue
+    function playNextInQueue() {
+        if (audioQueue.length === 0) {
+            currentAudio = null;
+            return;
+        }
+        
+        // Get next blob from queue
+        const nextBlob = audioQueue[0];
+        audioQueue = audioQueue.slice(1);
+        
+        // Create audio element and play
+        const audioUrl = URL.createObjectURL(nextBlob);
+        const audio = new Audio(audioUrl);
+        
+        audio.onended = () => {
+            // Clean up URL object
+            URL.revokeObjectURL(audioUrl);
+            // Play next in queue when done
+            playNextInQueue();
+        };
+        
+        currentAudio = audio;
+        
+        // Play the audio
+        audio.play().catch(error => {
+            console.error('Error playing audio:', error);
+            URL.revokeObjectURL(audioUrl);
+            playNextInQueue();
+        });
+    }
+
+    // Format voice name for display
+    function formatVoiceName(voice: VoiceType): string {
+        // Parse voice ID format (e.g., "af_heart", "bm_daniel")
+        const parts = voice.split('_');
+        if (parts.length !== 2) return voice;
+        
+        const [typeCode, name] = parts;
+        
+        // Map country codes to flag emojis
+        let countryEmoji = '';
+        if (typeCode.startsWith('a')) countryEmoji = '🇺🇸'; // American
+        else if (typeCode.startsWith('b')) countryEmoji = '🇬🇧'; // British
+        else countryEmoji = '🌐'; // Unknown country
+        
+        // Map gender codes to gender emojis
+        let genderEmoji = '';
+        if (typeCode.endsWith('f')) genderEmoji = '👩'; // Female
+        else if (typeCode.endsWith('m')) genderEmoji = '👨'; // Male
+        else genderEmoji = '🧑'; // Unknown gender
+        
+        // Capitalize the name
+        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
+        
+        // Format with emojis: [Flag][Gender] Name
+        return `${countryEmoji}${genderEmoji} ${capitalizedName}`;
+    }
 
     // Function to fetch books from our API
     async function fetchBooks(page = 1) {
@@ -87,17 +238,27 @@
             textChunks = [];
             isLoading = true;
             error = null;
+            ttsText = '';
 
             // We'll only fetch chunk by chunk as needed to avoid large payloads
-            const response = await fetch(`/api/books/${selectedBook.id}/content?chunk=${currentChunk}`);
-            
+            console.log(`/api/books/${selectedBook.id}/content`);
+            const response = await fetch(`/api/books/${selectedBook.id}/content`); //?chunk=${currentChunk}
+            console.log('Response:', response);
             if (!response.ok) {
                 throw new Error(`Error fetching book content: ${response.status}`);
             }
-            
+
             const data = await response.json();
-            ttsText = data.chunk.text;
-            totalChunks = data.totalChunks;
+            console.log('Fetched content:', data);
+            
+            // Extract text from the first chapter
+            if (data["chapter-1"]) {
+                ttsText = data["chapter-1"];
+                totalChunks = 1;
+            } else {
+                throw new Error('No content found in the book');
+            }
+            
             isLoading = false;
         } catch (err) {
             console.error('Error loading book content:', err);
@@ -124,9 +285,31 @@
 
     // Function to send text to TTS engine
     function speakText() {
-        // For now, just alert the text - in a real implementation you'd hook this up to your TTS engine
-        alert(`TTS would speak: ${ttsText.substring(0, 100)}...`);
-        // Here you would connect to your existing Kokoro TTS system
+        if (!worker || !ttsText.trim() || isGenerating) return;
+        
+        try {
+            isGenerating = true;
+            streamedText = "";
+            
+            // Clear existing audio queue
+            audioQueue = [];
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
+            // Send message to worker to generate speech
+            const message: WorkerInMessage = {
+                text: ttsText,
+                voice: selectedVoice,
+                speed: speedSetting
+            };
+            
+            worker.postMessage(message);
+        } catch (error) {
+            console.error('Error sending message to worker:', error);
+            isGenerating = false;
+        }
     }
 
     // Helper function to truncate text
@@ -229,11 +412,45 @@
                         <div class="border rounded-lg p-4 bg-base-200">
                             <div class="flex justify-between mb-4">
                                 <h3 class="font-semibold">Text for TTS</h3>
-                                <span>Chunk {currentChunk + 1} of {totalChunks}</span>
+                                {#if deviceType}
+                                    <span class="badge badge-outline my-auto">Device: {deviceType}</span>
+                                {/if}
                             </div>
                             
                             <div class="max-h-96 overflow-y-auto mb-4 p-4 bg-base-100 rounded">
                                 <p style="white-space: pre-wrap;">{ttsText}</p>
+                            </div>
+                            
+                            <!-- TTS Controls -->
+                            <div class="flex flex-wrap gap-4 mb-4">
+                                {#if availableVoices.length > 0}
+                                <div class="mb-2">
+                                    <label for="voice-select" class="block mb-2">Voice:</label>
+                                    <select 
+                                        id="voice-select"
+                                        bind:value={selectedVoice}
+                                        class="select select-bordered"
+                                    >
+                                        {#each availableVoices as voice}
+                                            <option value={voice}>{formatVoiceName(voice)}</option>
+                                        {/each}
+                                    </select>
+                                </div>
+                                {/if}
+                                
+                                <div class="mb-2">
+                                    <label for="speed-select" class="block mb-2">Speed:</label>
+                                    <input 
+                                        id="speed-select"
+                                        type="range" 
+                                        min="0.5" 
+                                        max="2" 
+                                        step="0.1" 
+                                        bind:value={speedSetting} 
+                                        class="range range-sm"
+                                    />
+                                    <span class="ml-2">{speedSetting.toFixed(1)}x</span>
+                                </div>
                             </div>
                             
                             <div class="flex justify-between">
@@ -241,8 +458,12 @@
                                     Previous Chunk
                                 </button>
                                 
-                                <button class="btn btn-sm btn-primary" onclick={speakText}>
-                                    Read Aloud
+                                <button 
+                                    class="btn btn-sm btn-primary" 
+                                    onclick={speakText}
+                                    disabled={isGenerating || !worker}
+                                >
+                                    {isGenerating ? 'Generating...' : 'Read Aloud'}
                                 </button>
                                 
                                 <button class="btn btn-sm btn-outline" disabled={currentChunk === totalChunks - 1} onclick={nextChunk}>
@@ -250,6 +471,22 @@
                                 </button>
                             </div>
                         </div>
+
+                        {#if streamedText}
+                            <div class="mt-4 p-4 border rounded-md bg-base-200">
+                                <h3 class="text-lg font-semibold mb-2">Currently speaking:</h3>
+                                <p>{streamedText}</p>
+                            </div>
+                        {/if}
+
+                        {#if isGenerating}
+                            <div class="mt-4">
+                                <div class="alert">
+                                    <span>Generating speech...</span>
+                                    <span class="loading loading-spinner"></span>
+                                </div>
+                            </div>
+                        {/if}
                     {/if}
                 </div>
             </div>
