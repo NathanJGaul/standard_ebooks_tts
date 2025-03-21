@@ -1,27 +1,16 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { env } from '$env/dynamic/private';
-
-// Define book interface
-export interface Book {
-    id: string;           // Unique identifier (slug or URL path)
-    title: string;        // Book title
-    author: string;       // Book author
-    coverUrl: string;     // URL to cover image
-    description: string;  // Book description
-    url: string;          // URL to the book on Standard Ebooks
-    downloadUrl: string;  // URL to download the book (epub)
-}
+import type { Book } from "$lib/types/books";
 
 // In-memory cache with expiration
-type CacheEntry = {
-    data: Book[];
-    timestamp: number;
-};
+// type CacheEntry = {
+//     data: Book[];
+//     timestamp: number;
+// };
 
 // Cache with a TTL of 1 hour (in milliseconds)
-const CACHE_TTL = 60 * 60 * 1000;
-const cache: Record<string, CacheEntry> = {};
+// const CACHE_TTL = 60 * 60 * 1000;
+// const cache: Record<string, CacheEntry> = {};
 
 // Security and rate limiting
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
@@ -59,21 +48,12 @@ function checkRateLimit(ip: string): boolean {
 /**
  * Fetch and parse book data from Standard Ebooks
  */
-async function scrapeBooks(page = 1, skipCache = false): Promise<Book[]> {
+async function scrapeBooks(page = 1): Promise<Book[]> {
     try {
-        // Check cache first (unless skipCache is true)
-        const cacheKey = `books_page_${page}`;
-        const cached = cache[cacheKey];
-        
-        if (!skipCache && cached && cached.data.length > 0 && Date.now() - cached.timestamp < CACHE_TTL) {
-            console.log(`[API] Serving books from cache, page ${page}`);
-            return cached.data;
-        }
-        
         // Fetch data
         const url = `${STANDARD_EBOOKS_EBOOKS_URL}?page=${page}`;
             
-        console.log(`[API] Fetching books from: ${url}${skipCache ? ' (cache bypassed)' : ''}`);
+        console.log(`[API] Fetching books from: ${url}`);
         
         const response = await fetch(url, {
             headers: {
@@ -90,12 +70,6 @@ async function scrapeBooks(page = 1, skipCache = false): Promise<Book[]> {
         
         // Use server-side HTML parsing
         const books = parseBookHtml(html);
-        
-        // Save to cache
-        cache[cacheKey] = {
-            data: books,
-            timestamp: Date.now()
-        };
         
         return books;
     } catch (err) {
@@ -199,24 +173,14 @@ export const GET: RequestHandler = async ({ url, getClientAddress }) => {
             throw error(400, 'Invalid page parameter');
         }
         
-        // Check if cache should be bypassed
-        // const noCache = url.searchParams.get('no-cache') === 'true';
-        const noCache = true; // For testing purposes, always bypass cache
-        
         // Get book data
-        const books = await scrapeBooks(page, noCache);
-        
-        // Set appropriate cache headers
-        const cacheControl = noCache 
-            ? 'no-store, max-age=0' 
-            : 'public, max-age=3600'; // Cache for 1 hour
+        const books = await scrapeBooks(page);
         
         // Return as JSON
         return new Response(JSON.stringify({ books, page }), {
             status: 200,
             headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': cacheControl
+                'Content-Type': 'application/json'
             }
         });
     } catch (e: any) {

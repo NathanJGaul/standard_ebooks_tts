@@ -1,97 +1,80 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import type { WorkerOutMessage, WorkerInMessage } from "$lib/types/worker";
     import type { VoiceType } from "$lib/types/voices";
     import sampleTexts from "$lib/client/sampleTexts";
+    import { TTSWorkerService, createAudioQueue, formatVoiceName } from "$lib/client/ttsWorkerService";
     
     // State variables
     let textToSpeak = $state('Life is like a box of chocolates. You never know what you\'re gonna get.');
-    let worker = $state<Worker | null>(null);
+    let ttsService = $state<TTSWorkerService | null>(null);
     let isLoading = $state(true);
     let isGenerating = $state(false);
     let availableVoices = $state<VoiceType[]>([]);
     let selectedVoice = $state<VoiceType>("af_heart");
     let deviceType = $state<string>("");
-    let audioQueue = $state<Blob[]>([]);
-    let currentAudio = $state<HTMLAudioElement | null>(null);
-    let speechProgress = $state<string>("");
     let streamedText = $state<string>("");
     let speedSetting = $state<number>(1.0);
+    let error = $state<string>("");
+    
+    // Initialize audio queue
+    const audioQueue = createAudioQueue();
     
     // Initialize worker on mount
     onMount(() => {
-        initializeWorker();
+        initializeTTSService();
     });
     
     // Clean up worker on component destroy
     onDestroy(() => {
-        if (worker) {
-            worker.terminate();
+        if (ttsService) {
+            ttsService.terminate();
         }
     });
     
-    // Initialize the TTS web worker
-    function initializeWorker() {
+    // Initialize the TTS service
+    async function initializeTTSService() {
         try {
             isLoading = true;
             
-            // Create the worker
-            worker = new Worker(new URL('$lib/client/worker.ts', import.meta.url), { type: 'module' });
-            
-            // Set up event handler for worker messages
-            worker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
-                const data = event.data;
-                
-                switch (data.status) {
-                    case "device":
-                        deviceType = data.device;
-                        console.log(`Using device: ${deviceType}`);
-                        break;
-                        
-                    case "ready":
-                        availableVoices = data.voices as VoiceType[];
-                        deviceType = data.device;
-                        isLoading = false;
-                        console.log('Kokoro TTS model loaded and ready through worker');
-                        break;
-                        
-                    case "stream":
-                        // Handle streaming chunk
-                        streamedText = data.chunk.text;
-                        const audioBlob = data.chunk.audio;
-                        
-                        // Add to audio queue and play if not already playing
-                        addToAudioQueue(audioBlob);
-                        break;
-                        
-                    case "complete":
-                        // TTS generation complete
-                        isGenerating = false;
-                        if (data.audio) {
-                            console.log('TTS generation complete with full audio');
-                        } else {
-                            console.log('TTS generation complete, no audio generated');
-                        }
-                        break;
-                        
-                    case "error":
-                        console.error(`Worker error: ${data.error}`);
-                        isGenerating = false;
-                        isLoading = false;
-                        break;
+            // Create the TTS service with callbacks
+            ttsService = new TTSWorkerService({
+                onDeviceDetected: (device) => {
+                    deviceType = device;
+                    console.log(`Using device: ${deviceType}`);
+                },
+                onReady: (voices, device) => {
+                    availableVoices = voices;
+                    deviceType = device;
+                    isLoading = false;
+                    console.log('Kokoro TTS model loaded and ready through worker');
+                },
+                onStream: (text, audio) => {
+                    streamedText = text;
+                    audioQueue.addToQueue(audio);
+                },
+                onComplete: (audio) => {
+                    isGenerating = false;
+                    if (audio) {
+                        console.log('TTS generation complete with full audio');
+                    } else {
+                        console.log('TTS generation complete, no audio generated');
+                    }
+                },
+                onError: (errorMsg) => {
+                    console.error(`Worker error: ${errorMsg}`);
+                    isGenerating = false;
+                    isLoading = false;
+                    error = errorMsg;
                 }
-            };
+            });
             
-            // Handle worker errors
-            worker.onerror = (error) => {
-                console.error('Worker error:', error);
-                isLoading = false;
-                isGenerating = false;
-            };
+            // Initialize the worker
+            await ttsService.initialize();
             
-        } catch (error) {
-            console.error('Error initializing worker:', error);
+        } catch (err) {
+            console.error('Error initializing TTS service:', err);
             isLoading = false;
+            error = err instanceof Error ? err.message : 'Unknown error initializing TTS service';
         }
     }
     
@@ -101,114 +84,25 @@
         textToSpeak = sampleTexts[randomIndex];
     }
     
-    // Format voice name for display
-    function formatVoiceName(voice: VoiceType): string {
-        // Parse voice ID format (e.g., "af_heart", "bm_daniel")
-        const parts = voice.split('_');
-        if (parts.length !== 2) return voice;
-        
-        const [typeCode, name] = parts;
-        
-        // Map country codes to flag emojis
-        let countryEmoji = '';
-        if (typeCode.startsWith('a')) countryEmoji = '🇺🇸'; // American
-        else if (typeCode.startsWith('b')) countryEmoji = '🇬🇧'; // British
-        else countryEmoji = '🌐'; // Unknown country
-        
-        // Map gender codes to gender emojis
-        let genderEmoji = '';
-        if (typeCode.endsWith('f')) genderEmoji = '👩'; // Female
-        else if (typeCode.endsWith('m')) genderEmoji = '👨'; // Male
-        else genderEmoji = '🧑'; // Unknown gender
-        
-        // Get full voice type text (keep this for accessibility and clarity)
-        let voiceType = '';
-        if (typeCode === 'af') voiceType = 'American Female';
-        else if (typeCode === 'am') voiceType = 'American Male';
-        else if (typeCode === 'bf') voiceType = 'British Female';
-        else if (typeCode === 'bm') voiceType = 'British Male';
-        else voiceType = typeCode.toUpperCase(); // Fallback for unknown types
-        
-        // Capitalize the name
-        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
-        
-        // Format with emojis: [Flag][Gender] Name (Voice Type)
-        // return `${countryEmoji}${genderEmoji} ${capitalizedName} (${voiceType})`;
-        return `${countryEmoji}${genderEmoji} ${capitalizedName}`;
-    }
-    
     // Handle form submission to generate speech
     async function handleSubmit() {
-        if (!worker || !textToSpeak.trim() || isGenerating) return;
+        if (!ttsService || !textToSpeak.trim() || isGenerating) return;
         
         try {
             isGenerating = true;
             streamedText = "";
+            error = "";
             
             // Clear existing audio queue
-            audioQueue = [];
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio = null;
-            }
+            audioQueue.clearQueue();
             
-            // Send message to worker to generate speech
-            const message: WorkerInMessage = {
-                text: textToSpeak,
-                voice: selectedVoice,
-                speed: speedSetting
-            };
-            
-            worker.postMessage(message);
-        } catch (error) {
-            console.error('Error sending message to worker:', error);
+            // Generate speech using our service
+            await ttsService.generateSpeech(textToSpeak, selectedVoice, speedSetting);
+        } catch (err) {
+            console.error('Error generating speech:', err);
+            error = err instanceof Error ? err.message : 'Unknown error generating speech';
             isGenerating = false;
         }
-    }
-    
-    // Add audio blob to queue and play if not already playing
-    function addToAudioQueue(audioBlob: Blob) {
-        audioQueue = [...audioQueue, audioBlob];
-        
-        // If not currently playing audio, start playing
-        if (!currentAudio) {
-            playNextInQueue();
-        }
-    }
-    
-    // Play next audio in queue
-    function playNextInQueue() {
-        if (audioQueue.length === 0) {
-            currentAudio = null;
-            return;
-        }
-        
-        // Get next blob from queue
-        const nextBlob = audioQueue[0];
-        audioQueue = audioQueue.slice(1);
-        
-        // Create audio element and play
-        const audioUrl = URL.createObjectURL(nextBlob);
-        const audio = new Audio(audioUrl);
-        
-        audio.onended = () => {
-            // Clean up URL object
-            URL.revokeObjectURL(audioUrl);
-            // Play next in queue when done
-            playNextInQueue();
-        };
-        
-        currentAudio = audio;
-        
-        // Update progress indicator
-        speechProgress = `Playing chunk ${streamedText.length > 30 ? streamedText.substring(0, 30) + '...' : streamedText}`;
-        
-        // Play the audio
-        audio.play().catch(error => {
-            console.error('Error playing audio:', error);
-            URL.revokeObjectURL(audioUrl);
-            playNextInQueue();
-        });
     }
 </script>
 
@@ -272,7 +166,7 @@
     
     <button 
         onclick={handleSubmit} 
-        disabled={isLoading || isGenerating || !worker}
+        disabled={isLoading || isGenerating || !ttsService}
         class="btn btn-primary"
     >
         {isGenerating ? 'Generating...' : 'Speak Text'}
@@ -290,6 +184,14 @@
             <div class="alert">
                 <span>Generating speech...</span>
                 <span class="loading loading-spinner"></span>
+            </div>
+        </div>
+    {/if}
+    
+    {#if error}
+        <div class="mt-4">
+            <div class="alert alert-error">
+                <span>{error}</span>
             </div>
         </div>
     {/if}

@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import * as cheerio from 'cheerio';
+import type { BookContent } from '$lib/types/books';
 
 // Target URL for scraping
 const STANDARD_EBOOKS_EBOOKS_URL = "https://standardebooks.org/ebooks";
@@ -25,8 +26,6 @@ export const GET: RequestHandler = async ({ url, params }) => {
         
         chunk ? console.log(`[API] Fetching book content for ID: ${id}, chunk: ${chunk}`)
               : console.log(`[API] Fetching book content for ID: ${id}`);
-
-        const noCache = true; // For testing purposes, always bypass cache
         
         // Get book text content
         const bookContentUrl = getBookContentUrl(id);
@@ -43,19 +42,43 @@ export const GET: RequestHandler = async ({ url, params }) => {
         const html = await response.text();
 
         const $ = cheerio.load(html);
-        const bookContent = $('#chapter-1').text().trim(); // Extract content from the first chapter
+        let bookContent: BookContent = {
+            chapters: []
+        };
+        try {
+            bookContent = $.extract({
+                chapters: [
+                    {
+                        selector: `section[id^='chapter-']`,
+                        value: (el, key) => {
+                            const chapterNumber = parseInt($(el).attr('id')?.split('-')[1]!, 10);
+                            const chapterTitle = $(el).find('p[epub\\:type="title"]').text().trim();
+                            const chapterContents: string[] = $(el).find('p:not(hgroup p)')
+                                                                .map((i, pEl) => $(pEl).text().trim().replace(/^[“"']|[”"']$/g, ''))
+                                                                .get();
+                            return {
+                                chapterNumber,
+                                chapterTitle,
+                                chapterContents
+                            }
+                        }
+                    }
+                ]
+            });
+        } catch (e) {
+            console.error('Error extracting book content:', e);
+            throw error(500, 'Failed to extract book content');
+        }
 
-        // Set appropriate cache headers
-        const cacheControl = noCache
-            ? 'no-store, max-age=0'
-            : 'public, max-age=86400'; // Cache for 1 day
+        if (!bookContent.chapters || bookContent.chapters.length === 0) {
+            throw error(404, 'Book content not found');
+        }
         
         // Return as JSON
-        return new Response(JSON.stringify({ "chapter-1": bookContent }), {
+        return new Response(JSON.stringify(bookContent), {
             status: 200,
             headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': cacheControl
+                'Content-Type': 'application/json'
             }
         });
     } catch (e: any) {

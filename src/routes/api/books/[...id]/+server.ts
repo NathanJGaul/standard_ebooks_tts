@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import type { Book } from '../+server';
 import * as cheerio from 'cheerio';
+import type { BookDetails } from "$lib/types/books";
 
 // In-memory cache with expiration
 type CacheEntry = {
@@ -15,20 +15,6 @@ const cache: Record<string, CacheEntry> = {};
 
 // Target URL for scraping
 const STANDARD_EBOOKS_BASE_URL = "https://standardebooks.org";
-
-// Extended book interface with additional details
-interface BookDetails extends Book {
-    fullText?: string;    // Full text content (if available)
-    language?: string;    // Book language
-    subjects?: string[];  // Book subjects/categories
-    publicationDate?: string; // Publication date
-    wordCount?: number;   // Word count (if available)
-    readingEase?: number; // Reading ease score (if available)
-    chapters?: { 
-        title: string;
-        url: string;
-    }[];                  // Chapter information
-}
 
 /**
  * Fetch and parse detailed book data from Standard Ebooks
