@@ -48,7 +48,7 @@ try {
     const { text, voice, speed } = e.data as WorkerInMessage;
 
     // Validate inputs
-    if (!text || text.trim() === '') {
+    if (!text || text.trim() === "") {
       self.postMessage({
         status: "error",
         error: "Empty text provided for TTS processing",
