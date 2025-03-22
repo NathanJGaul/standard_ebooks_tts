@@ -24,11 +24,13 @@ export const GET: RequestHandler = async ({ url, params }) => {
       throw error(400, "Missing book ID");
     }
 
-    chunk
-      ? console.log(
+    if (chunk) {
+      console.log(
         `[API] Fetching book content for ID: ${id}, chunk: ${chunk}`,
-      )
-      : console.log(`[API] Fetching book content for ID: ${id}`);
+      );
+    } else {
+      console.log(`[API] Fetching book content for ID: ${id}`);
+    }
 
     // Get book text content
     const bookContentUrl = getBookContentUrl(id);
